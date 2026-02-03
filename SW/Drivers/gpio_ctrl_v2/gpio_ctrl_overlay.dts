@@ -1,0 +1,31 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2835";
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            gpio_ctrl: gpio_ctrl {
+                compatible = "osurv,all-gpio";
+
+
+                // Not used pins will be to pin 14.
+                //TODO Check if in collision with UART.
+                gpio00-gpios = <&gpio 14 0>;
+
+                gpio02-gpios = <&gpio 2 0>;
+                gpio03-gpios = <&gpio 3 0>;
+                gpio04-gpios = <&gpio 4 0>;
+
+                gpio17-gpios = <&gpio 17 0>;
+                gpio18-gpios = <&gpio 18 0>;
+
+                gpio22-gpios = <&gpio 22 0>;
+                gpio23-gpios = <&gpio 23 0>;
+                gpio24-gpios = <&gpio 24 0>;
+            };
+        };
+    };
+};
