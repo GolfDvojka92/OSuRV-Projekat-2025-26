@@ -1,7 +1,7 @@
 
 DRV_NAME := gpio_ctrl
 
-DEV_MAJOR := 270
+DEV_MAJOR := 261
 
 TARGET := $(DRV_NAME).ko
 
@@ -14,22 +14,14 @@ DEST := /lib/modules/$(CURRENT)/kernel/$(MDIR)
 EXTRA_CFLAGS := -I$(PWD) -DDEV_MAJOR=$(DEV_MAJOR)
 
 obj-m := gpio_ctrl.o
-gpio_ctrl-objs := main.o
+gpio_ctrl-objs := gpio.o main.o
 
 .PHONY: default
 default: build
 
 .PHONY: prerequisites
 prerequisites:
-	sudo apt update
-	sudo apt -y install linux-headers-$(uname -r)
-
-.PHONY: setup
-setup:
-	dtc -@ -I dts -O dtb -o gpio_ctrl.dtbo gpio_ctrl_overlay.dts
-	sudo cp gpio_ctrl.dtbo /boot/firmware/overlays/
-	echo 'dtoverlay=gpio_ctrl' | sudo tee -a /boot/firmware/config.txt
-	sudo sed -i 's/dtparam=i2c_arm=on/dtparam=i2c_arm=off/g' /boot/firmware/config.txt
+	sudo apt -y install raspberrypi-kernel raspberrypi-kernel-headers
 
 .PHONY: build
 build: stop check_is_major_free
@@ -42,15 +34,17 @@ check_is_major_free:
 		echo "Major $(DEV_MAJOR) is occupied!"; \
 		exit 1; \
 	fi
-	if [ `cat /proc/devices | grep -c $(DEV_MAJOR)` != 0 ]; \
+	if [ `cat /proc/devices | grep -c $(DEV_MMAP_MAJOR)` != 0 ]; \
 	then \
-		echo "Major $(DEV_MAJOR) is occupied!"; \
+		echo "Major $(DEV_MMAP_MAJOR) is occupied!"; \
 		exit 1; \
 	fi
 
 .PHONY: start
 start:
 	sudo insmod $(TARGET)
+	sudo rm -f /dev/gpio_stream
+	sudo mknod /dev/gpio_stream c $(DEV_MAJOR) 0
 	sudo chmod a+rw /dev/gpio_stream
 	
 .PHONY: stop
@@ -68,7 +62,6 @@ install:
 .PHONY: clean
 clean:
 	rm -f *.o $(TARGET) .*.cmd .*.flags *.mod.c *. \
-		modules.order Module.symvers *.mod \
-		*.dtbo
+		modules.order Module.symvers *.mod
 
 -include $(KDIR)/Rules.make
