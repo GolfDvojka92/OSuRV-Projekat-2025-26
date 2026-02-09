@@ -2,12 +2,12 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <fcntl.h>
-#include <stdio.h>      //printf, perror
-#include <stdlib.h>     //EXIT_FAILURE, EXIT_SUCCESS
-#include <string.h>     //memset
-#include <sys/socket.h> //socket, bind, recvfrom, sendto
-#include <arpa/inet.h>  //struct sockaddr_in
-#include <unistd.h>     //close
+#include <stdio.h>      // printf, perror
+#include <stdlib.h>     // EXIT_FAILURE, EXIT_SUCCESS
+#include <string.h>     // memset
+#include <sys/socket.h> // socket, bind, recvfrom, sendto
+#include <arpa/inet.h>  // struct sockaddr_in
+#include <unistd.h>     // close, usleep
 
 #define DEV_FN "/dev/gpio_stream"
 
@@ -16,22 +16,33 @@
 #define DEFAULT_BUFLEN 1024
 
 #define ERROR_EXIT(...) fprintf(stderr, __VA_ARGS__); exit(EXIT_FAILURE)
-#define ERROR_RETURN(R, ...) fprintf(stderr, __VA_ARGS__); return R
 
 #define NUM_OF_ANGLES 100
 
 int gpio_write(int fd, uint8_t pin, uint8_t value) {
-	uint8_t pkg[3];
-	pkg[0] = 'w';
-	pkg[1] = pin;
-	pkg[2] = value;
-
-	if(write(fd, &pkg, 3) != 3){
-		perror("Failed to write to GPIO");
-		return EXIT_FAILURE;
-	}
-	return EXIT_SUCCESS;
+    uint8_t pkg[3];
+    pkg[0] = 'w';
+    pkg[1] = pin;
+    pkg[2] = value;
+    printf("[DEBUG] GPIO write: pin=%d value=%d\n", pin, value);
+    if(write(fd, &pkg, 3) != 3){
+        perror("Failed to write to GPIO");
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
 }
+
+// Half-step sequence for ULN2003 + 28BYJ-48
+const uint8_t step_seq[8][4] = {
+    {1,0,0,0},
+    {1,1,0,0},
+    {0,1,0,0},
+    {0,1,1,0},
+    {0,0,1,0},
+    {0,0,1,1},
+    {0,0,0,1},
+    {1,0,0,1}
+};
 
 int main()
 {
@@ -40,9 +51,10 @@ int main()
 
     // Creating socket file descriptor
     if ((client_socket_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        ERROR_EXIT("Socket creation failed");
+        ERROR_EXIT("Socket creation failed\n");
     }
-    printf("Socket created sccessfully, socket_fd = %d\n", client_socket_fd);
+    printf("Socket created successfully, socket_fd = %d\n", client_socket_fd);
+
     memset(&servaddr, 0, sizeof(servaddr));
 
     // Filling server information
@@ -53,62 +65,61 @@ int main()
     // Connect the socket to the server
     if (connect(client_socket_fd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
         close(client_socket_fd);
-        ERROR_EXIT("Connecting failed");
+        ERROR_EXIT("Connecting failed\n");
     }
-    printf("Socket connected sccessfully, IP address : %s, port : %hu\n", inet_ntoa(servaddr.sin_addr), ntohs(servaddr.sin_port));
+    printf("Socket connected successfully, IP: %s, port: %hu\n", inet_ntoa(servaddr.sin_addr), ntohs(servaddr.sin_port));
 
-    //  Opening GPIO driver
-	int gpio_fd = open(DEV_FN, O_RDWR);
-	if(gpio_fd < 0){
+    // Opening GPIO driver
+    int gpio_fd = open(DEV_FN, O_RDWR);
+    if(gpio_fd < 0){
         close(client_socket_fd);
-        ERROR_EXIT("Failed to open GPIO driver");
-	}
+        ERROR_EXIT("Failed to open GPIO driver\n");
+    }
     printf("GPIO driver opened successfully\n");
 
     uint32_t distance;
     char message[] = "REQ";
-    uint8_t step = 0;
     uint16_t angle = 0;
     uint32_t measurements[NUM_OF_ANGLES];
 
     while (1) {
-        //  Sending REQ to sensor to signal that the motor is in place for the next measurement
-        ssize_t sent_size;
-        if ((sent_size = sendto(client_socket_fd, message, strlen(message), 0, (const struct sockaddr *)NULL, sizeof(servaddr))) != strlen(message)) {
+        // Send REQ to sensor
+        if (sendto(client_socket_fd, message, strlen(message), 0, NULL, sizeof(servaddr)) != strlen(message)) {
             close(client_socket_fd);
             close(gpio_fd);
-            ERROR_EXIT("Sending failed");
+            ERROR_EXIT("Sending failed\n");
         }
 
-        //  Recieving the measurement
-        ssize_t received_size;
-        if ((received_size = recvfrom(client_socket_fd, &distance, sizeof(distance), 0, (struct sockaddr *)NULL, NULL)) < 0) {
+        // Receive distance
+        if (recvfrom(client_socket_fd, &distance, sizeof(distance), 0, NULL, NULL) < 0) {
             close(client_socket_fd);
             close(gpio_fd);
-            ERROR_EXIT("Recieving of data failed");
+            ERROR_EXIT("Receiving failed\n");
         }
-        printf("Received message : %u mm\n", distance);
+        printf("Received distance: %u mm\n", distance);
 
-        //  Saving the measurement into an array that will be forwarded over to plot.py, indexed by the angle (subject to A/B testing)
+        // Save measurement
         measurements[angle] = distance;
 
-        //  Moving the stepper motor for 20 steps (subject to A/B testing)
-        for (int i = 0; i < 20; i++) {
-            if (step > 3)   step = 0;
-            gpio_write(gpio_fd, 17, step == 0);
-            gpio_write(gpio_fd, 18, step == 1);
-            gpio_write(gpio_fd, 22, step == 2);
-            gpio_write(gpio_fd, 23, step == 3);
-            step++;
+        // Rotate stepper 20 steps using half-step sequence
+        for(int i=0; i<20; i++){
+            for(int s=0; s<8; s++){
+                gpio_write(gpio_fd, 17, step_seq[s][0]);
+                gpio_write(gpio_fd, 18, step_seq[s][1]);
+                gpio_write(gpio_fd, 22, step_seq[s][2]);
+                gpio_write(gpio_fd, 23, step_seq[s][3]);
+                usleep(70000); // 2 ms delay, možeš povećati ako motor šteka
+            }
         }
 
-        // Incrementing the angle index, number of angles is subject to A/B testing
+        // Increment angle index
         angle++;
-        if (angle > NUM_OF_ANGLES)  angle = 0;
+        if (angle >= NUM_OF_ANGLES) angle = 0;
     }
 
-    //  Closing file descriptors
     close(client_socket_fd);
-	close(gpio_fd);
+    close(gpio_fd);
     return EXIT_SUCCESS;
 }
+
+

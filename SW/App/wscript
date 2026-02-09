@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+# encoding: utf-8
+
+import os
+
+one_file_programs = [
+    'stepper_node.c',
+]
+
+def options(opt):
+    opt.load('compiler_c')
+
+def configure(cfg):
+    cfg.load('compiler_c')
+    cfg.check_cc(lib='pthread', uselib_store='PTHREAD', mandatory=False)
+    cfg.env.append_value('CFLAGS', ['-g', '-Wall'])
+    cfg.env.append_value('LINKFLAGS', ['-lpthread'])
+    # Include folder za GPIO driver (za header)
+    driver_include = cfg.srcnode.find_node('../Driver/gpio_ctrl/include')
+    if driver_include:
+        cfg.env.INCLUDES_USER = [driver_include.abspath()]
+    else:
+        cfg.fatal('Driver include directory not found')
+
+def build(bld):
+    for source in one_file_programs:
+        target_name, _ = os.path.splitext(os.path.basename(source))
+        bld.program(
+            target=target_name,
+            source=[source],          # samo stepper_node.c
+            includes=bld.env.INCLUDES_USER,
+            use=['PTHREAD'],
+            install_path=False
+        )
+
