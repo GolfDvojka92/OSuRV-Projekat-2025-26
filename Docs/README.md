@@ -19,25 +19,32 @@ The project consists of **three main programs**:
 
 # System Workflow
 
-1. `stepper_node.c` rotates the stepper motor.
-2. After each movement:
+1. **Motor Control (`stepper_node.c`)**  
+   `stepper_node.c` controls the rotation of the stepper motor and defines the current angular position.
 
-   * It sends a UDP request to `sensor_node.py`
-   * Waits for the measured distance
-3. `sensor_node.py`:
+2. **Measurement Request (UDP Communication)**  
+   After each motor step:
+   - A UDP request is sent to `sensor_node.py`
+   - The program waits for the corresponding distance measurement
 
-   * Performs 5 measurements
-   * Averages valid (non-zero) values
-   * Sends the result back via UDP
-4. `stepper_node.c`:
+3. **Distance Acquisition (`sensor_node.py`)**  
+   Upon receiving a request:
+   - Five consecutive distance measurements are performed
+   - Invalid (zero) readings are filtered out
+   - The average of valid measurements is computed
+   - If all readings are zero, the last valid distance value is returned
+   - The final distance value is sent back via UDP
 
-   * Stores the measurement in a buffer
-   * Checks if the change is ≥ `DELTA`
-   * If true, publishes the full measurement array via ZeroMQ
-5. `plot_node.py`:
+4. **Data Processing and Publishing (`stepper_node.c`)**  
+   After receiving the distance:
+   - The measurement is stored in an angle-indexed buffer
+   - The new value is compared with the previous measurement
+   - If the absolute difference is greater than or equal to `DELTA`, the complete measurement array is published via ZeroMQ
 
-   * Displays the initial scan (blue)
-   * Displays points with significant change (red)
+5. **Visualization (`plot_node.py`)**  
+   `plot_node.py` subscribes to the published data and:
+   - Displays the initial scan in **blue**
+   - Highlights measurements with significant changes (greater than `DELTA`) in **red**
 
 ---
 
@@ -50,7 +57,7 @@ The system is designed as a rotating sensing platform.
 * **Computing Unit:** Raspberry Pi 2 Model B
 * **Sensor:** VL53L1X Time-of-Flight (ToF) Long Range Distance Sensor
 * **Actuator:** 28BYJ-48 Stepper Motor (5V)
-* **Driver:** ULN2003 Darlington Transistor Array
+* **Motor Driver IC:** ULN2003 Darlington Transistor Array
 * **Mechanical Interface:**
 
   * Metal flange motor shaft coupling
@@ -89,53 +96,161 @@ The system is designed as a rotating sensing platform.
 
 # Software Architecture
 
-## UDP Communication
+The software is structured into three functional layers:
 
-* `stepper_node.c` → UDP client
-* `sensor_node.py` → UDP server
-* Port: **32501**
+1. **Control Layer** – `stepper_node.c`  
+2. **Sensing Layer** – `sensor_node.py`  
+3. **Visualization Layer** – `plot_node.py`  
 
-Communication format:
+Communication between these layers is implemented using two different mechanisms:
 
-```
-Stepper → "REQ"
-Sensor  → uint32_t distance (4 bytes)
-```
+- **UDP** for deterministic request–response communication  
+- **ZeroMQ (PUB/SUB)** for asynchronous data streaming  
+
+This separation ensures low-latency sensing while keeping visualization independent from real-time motor control.
 
 ---
 
-## ZeroMQ Communication
+## UDP Communication (Control ↔ Sensor Layer)
 
-* `stepper_node.c` → ZMQ Publisher (`tcp://*:5555`)
-* `plot_node.py` → ZMQ Subscriber
+UDP is used for direct communication between the stepper controller and the distance sensor node.
 
-Data format:
+### Roles
+
+- `stepper_node.c` → **UDP Client**  
+- `sensor_node.py` → **UDP Server**  
+- Port: **32501**  
+- Protocol: IPv4  
+
+### Communication Flow
+
+For every angular position:
+
+1. `stepper_node.c` sends a request packet:
+   ```
+   "REQ"
+   ```
+
+3. Upon receiving the request, `sensor_node.py`:
+   - Performs **5 consecutive distance measurements**
+   - Filters out invalid (zero) readings
+   - Computes the average of valid samples
+   - If all measurements are zero, returns the **last valid distance**
+   - Sends back a 4-byte unsigned integer (`uint32_t`) representing the measured distance in millimeters
+
+4. `stepper_node.c` receives:
+   ```
+   uint32_t distance (4 bytes)
+   ```
+
+### Rationale for Using UDP
+
+- Minimal protocol overhead  
+- Low latency  
+- Simple request–response structure  
+- No connection management required  
+
+Since communication is local (same device or local network), reliability is sufficient for this application.
+
+---
+
+## ZeroMQ Communication (Control ↔ Visualization Layer)
+
+ZeroMQ is used for asynchronous publishing of measurement data toward the visualization node.
+
+### Roles
+
+- `stepper_node.c` → **ZeroMQ Publisher**
+  
+  ```
+  tcp://*:5555
+  ```
+- `plot_node.py` → **ZeroMQ Subscriber**
+
+### Publishing Logic
+
+After each new measurement:
+
+1. The distance value is stored in an angle-indexed buffer.
+2. The new value is compared with the previously published value.
+3. The entire measurement array is published. If the absolute difference satisfies:
+
+   ```
+   |new_value - previous_value| ≥ DELTA
+   ```
+
+This prevents unnecessary data transmission and reduces CPU load on the visualization side.
+
+### Data Format
+
+Each published message contains:
 
 ```
 NUM_OF_ANGLES × uint32_t
 ```
 
+Where:
+- `NUM_OF_ANGLES = 64`
+- Each element corresponds to one discrete angular position
+- Values represent distance in millimeters
+
 ---
 
 # Visualization
 
-`plot_node.py` generates:
+The `plot_node.py` application subscribes to ZeroMQ messages and renders the data using polar plots in real time.
 
-* **Figure 1** → Initial scan
-* **Figure 2** → Points where change > `DELTA`
+---
 
-Parameters:
+## Plot Configuration
+
+Two independent figures are generated:
+
+### Figure 1 — Initial Scan
+- Displays the first complete measurement set  
+- Represents the reference environment state  
+- Points are plotted in **blue**
+
+### Figure 2 — Change Detection
+- Displays only points where:
+
+  ```
+  |current_value - initial_value| > DELTA
+  ```
+
+- Significant environmental changes are plotted in **red**  
+- If no changes exceed the threshold, the plot remains empty  
+
+---
+
+## Polar Coordinate System
+
+The visualization uses a polar coordinate system configured as follows:
+
+- 0° aligned with **North**  
+- Counter-clockwise angular direction  
+- Maximum radial distance: **2000 mm**
+
+Angular resolution:
 
 ```
 NUM_OF_ANGLES = 64
-DELTA = 50 mm
+Angular step = 360° / 64
 ```
 
-The plot uses polar coordinates with:
+Each array index directly corresponds to a fixed angular position in space.
 
-* 0° at North
-* Counter-clockwise direction
-* Maximum range: 2100 mm
+---
+
+# Design Characteristics
+
+- Deterministic motor-driven scanning  
+- Request-based sensing (no continuous polling)  
+- Multi-sample averaging for noise reduction  
+- Zero-value filtering  
+- Delta-based event publishing  
+- Asynchronous real-time visualization  
+- Clear separation between control, sensing, and visualization layers  
 
 ---
 
@@ -242,21 +357,6 @@ The motor will return to its initial position and the program will exit safely.
 
 ---
 
-# Possible Improvements
-
-* Full 360° continuous rotation
-* Interpolation between points
-* CSV export
-* SLAM integration
-* 3D mapping
-* Adjustable DELTA parameter
-* Performance optimization
-
----
-
 # Authors
 
-Ivan Berenić
-Aljoša Špika
-Faculty of Technical Sciences
-Computer Science and Automation
+Ivan Berenić and Aljoša Špika
