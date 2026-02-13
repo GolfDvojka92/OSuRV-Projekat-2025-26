@@ -30,6 +30,7 @@ def build(bld):
             source=[source],          # samo stepper_node.c
             includes=bld.env.INCLUDES_USER,
             use=['PTHREAD'],
+            lib=['zmq'],
             install_path=False
         )
 
