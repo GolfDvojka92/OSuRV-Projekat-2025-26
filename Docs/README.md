@@ -143,16 +143,6 @@ For every angular position:
    ```
    uint32_t distance (4 bytes)
    ```
-
-### Rationale for Using UDP
-
-- Minimal protocol overhead  
-- Low latency  
-- Simple request–response structure  
-- No connection management required  
-
-Since communication is local (same device or local network), reliability is sufficient for this application.
-
 ---
 
 ## ZeroMQ Communication (Control ↔ Visualization Layer)
@@ -243,18 +233,6 @@ Each array index directly corresponds to a fixed angular position in space.
 
 ---
 
-# Design Characteristics
-
-- Deterministic motor-driven scanning  
-- Request-based sensing (no continuous polling)  
-- Multi-sample averaging for noise reduction  
-- Zero-value filtering  
-- Delta-based event publishing  
-- Asynchronous real-time visualization  
-- Clear separation between control, sensing, and visualization layers  
-
----
-
 # How to Run the System
 
 You need:
@@ -342,19 +320,6 @@ The motor will return to its initial position and the program will exit safely.
             └── gpio_ctrl.ko             
 
 ```
-
----
-
-# System Features
-
-* 64 angular positions
-* Bidirectional scanning (CW + CCW)
-* Averaging of 5 measurements
-* Filtering of zero readings
-* Real-time change detection
-* Dual polar visualization
-* Thread-based safe exit
-* Custom Linux GPIO driver
 
 ---
 
