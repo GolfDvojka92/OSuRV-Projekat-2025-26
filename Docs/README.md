@@ -15,6 +15,7 @@ The project consists of **three main programs**:
 | `sensor_node.py` | Python   | Reads distance data from the VL53L1X sensor and responds via UDP                                  |
 | `plot_node.py`   | Python   | Visualizes measurements in real time using polar plots                                            |
 
+> **Note:** `sensor_node.py` uses the Python VL53L1X driver, which must be installed before running the system: [VL53L1X Python Driver](https://github.com/pimoroni/vl53l1x-python.git
 ---
 
 # System Workflow
